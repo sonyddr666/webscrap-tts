@@ -180,9 +180,16 @@ def obter_token():
 # HEADERS COM ANTI-DETECÇÃO
 # ============================================================
 
+
 def get_headers():
     """Gera headers realistas com User-Agent rotativo"""
-    return {
+    
+    # Validar token a cada requisição para evitar loops
+    valido, msg = verificar_token_valido(TOKEN)
+    if not valido:
+        logger.warning(f"⚠️ Token pode estar expirado: {msg}")
+
+    headers = {
         "Authorization": f"Bearer {TOKEN}",
         "Content-Type": "application/json",
         "User-Agent": random.choice(USER_AGENTS),
@@ -198,6 +205,20 @@ def get_headers():
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"'
     }
+    
+    # Carregar cookies manuais se existirem
+    cookies_path = BASE_DIR / "manual_cookies.json"
+    if cookies_path.exists():
+        try:
+            with open(cookies_path, 'r') as f:
+                cookies = json.load(f)
+                # Converter dict para string de cookie
+                cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+                headers["Cookie"] = cookie_str
+        except Exception as e:
+            logger.warning(f"Erro ao carregar cookies manuais: {e}")
+            
+    return headers
 
 def delay_humano(min_seg=1.0, max_seg=2.5):
     """Pausa aleatória simulando comportamento humano"""
