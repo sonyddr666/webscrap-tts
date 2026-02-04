@@ -4,21 +4,30 @@ Script para renovar o INWORLD_TOKEN usando o refreshToken do Firebase
 Endpoint correto: /ai/inworld/portal/v1alpha/workspaces/{workspace_id}/token:generate
 """
 
+import os
 import requests
 import json
+from dotenv import load_dotenv
 
-# Configurações
-FIREBASE_API_KEY = "AIzaSyAPVBLVid0xPwjuU4Gmn_6_GyqxBq-SwQs"
-REFRESH_TOKEN = "AMf-vBwyj4N9ZYArutxdUilFu4K5FZJLbZEPHy9tLAoYpZ5x2pghrG-_zqL05jF7J7K7Tcp7X6xBeiFFYheTdNcmEoHVkqX8T-HcNVSI95wCDSuYLhkszY4ouqUlZNr7egpcIfzaMBeXiphxhjgyzg49kQxdiGsUIMxDEWqDZMEdKHcJxCGIZVT9JkqCata_tDIxGGwCJN5kSWudqKBHFyLW8Pw9wXcRUFJBNIzVGHyeN2D3YE23Zy9J2-oszN-75NCKpEjiKE-PhryyAhtu26NrWOxZdRfvWf59KM_Vas5tjfjrK_SRBQ1wcfyiOvP400Gl68nWCYWOInCjOAQqEgxB3n3d6hC7U9GInetcdP4uHOla8XcQy3hYwTXjJ-S1sPTe8FBiSj3hEtGsEZ7Gt5SCRIIGWtBcD48lYNbiyQcIXvPHpvhDznDgZXkyp74QF7UR1CMQLzgT"
-WORKSPACE_ID = "default--pb4bm1oowkem_r9ri2wiw"
+# Carrega variáveis de ambiente
+load_dotenv()
+
+# Configurações do .env (SEM CHAVES HARDCODED!)
+FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY", "AIzaSyAPVBLVid0xPwjuU4Gmn_6_GyqxBq-SwQs")
+FIREBASE_REFRESH_TOKEN = os.getenv("FIREBASE_REFRESH_TOKEN")
+WORKSPACE_ID = os.getenv("WORKSPACE_ID", "default--pb4bm1oowkem_r9ri2wiw")
 
 
 def refresh_firebase_token():
     """Renova o accessToken usando o refreshToken do Firebase"""
+    if not FIREBASE_REFRESH_TOKEN:
+        print("❌ FIREBASE_REFRESH_TOKEN não encontrado no .env!")
+        return None
+    
     print("🔄 Renovando token Firebase...")
     
     url = f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_API_KEY}"
-    payload = {"grant_type": "refresh_token", "refresh_token": REFRESH_TOKEN}
+    payload = {"grant_type": "refresh_token", "refresh_token": FIREBASE_REFRESH_TOKEN}
     
     response = requests.post(url, data=payload)
     
@@ -49,7 +58,6 @@ def generate_tts_token(firebase_token):
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
-    # Payload vazio ou mínimo
     payload = json.dumps({})
     
     response = requests.post(url, headers=headers, data=payload, timeout=30)

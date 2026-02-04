@@ -33,9 +33,9 @@ WORKSPACE_ID = os.getenv("WORKSPACE_ID", "default--pb4bm1oowkem_r9ri2wiw")
 BASE_URL = "https://api.inworld.ai"
 DELAY_DELETE_SEGUNDOS = 50
 
-# Firebase Token Refresh
-FIREBASE_API_KEY = "AIzaSyAPVBLVid0xPwjuU4Gmn_6_GyqxBq-SwQs"
-FIREBASE_REFRESH_TOKEN = os.getenv("FIREBASE_REFRESH_TOKEN", "AMf-vBwyj4N9ZYArutxdUilFu4K5FZJLbZEPHy9tLAoYpZ5x2pghrG-_zqL05jF7J7K7Tcp7X6xBeiFFYheTdNcmEoHVkqX8T-HcNVSI95wCDSuYLhkszY4ouqUlZNr7egpcIfzaMBeXiphxhjgyzg49kQxdiGsUIMxDEWqDZMEdKHcJxCGIZVT9JkqCata_tDIxGGwCJN5kSWudqKBHFyLW8Pw9wXcRUFJBNIzVGHyeN2D3YE23Zy9J2-oszN-75NCKpEjiKE-PhryyAhtu26NrWOxZdRfvWf59KM_Vas5tjfjrK_SRBQ1wcfyiOvP400Gl68nWCYWOInCjOAQqEgxB3n3d6hC7U9GInetcdP4uHOla8XcQy3hYwTXjJ-S1sPTe8FBiSj3hEtGsEZ7Gt5SCRIIGWtBcD48lYNbiyQcIXvPHpvhDznDgZXkyp74QF7UR1CMQLzgT")
+# Firebase Token Refresh (do .env)
+FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY", "AIzaSyAPVBLVid0xPwjuU4Gmn_6_GyqxBq-SwQs")
+FIREBASE_REFRESH_TOKEN = os.getenv("FIREBASE_REFRESH_TOKEN")
 
 # Token atual (pode ser renovado)
 current_token = INWORLD_TOKEN
@@ -290,6 +290,11 @@ async def queue_worker():
     
     while True:
         try:
+            # Aguarda a queue estar pronta
+            if audio_queue is None:
+                await asyncio.sleep(0.5)
+                continue
+                
             item = await audio_queue.get()
             update = item['update']
             texto = item['texto']
@@ -319,6 +324,7 @@ async def queue_worker():
             
         except Exception as e:
             logger.error(f"Erro no worker: {e}")
+            await asyncio.sleep(1)  # Evita loop infinito de erros
 
 
 async def deletar_arquivo_depois(caminho: str, delay: int = DELAY_DELETE_SEGUNDOS):
