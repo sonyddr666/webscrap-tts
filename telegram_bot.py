@@ -48,17 +48,56 @@ user_voices: Dict[int, str] = {}
 # Voz padrão
 DEFAULT_VOICE = os.getenv("TTS_VOICE_ID", "default--pb4bm1oowkem_r9ri2wiw__sony")
 
-# Idiomas suportados
+# Mapeamento de vozes por idioma (baseado na documentação Inworld)
+VOICE_LANGUAGES = {
+    # English
+    'Blake': 'en', 'Clive': 'en', 'Hades': 'en', 'Hana': 'en', 'Luna': 'en',
+    'Mark': 'en', 'Olivia': 'en', 'Theodore': 'en', 'Alex': 'en', 'Ashley': 'en',
+    'Carter': 'en', 'Craig': 'en', 'Deborah': 'en', 'Dennis': 'en', 'Dominus': 'en',
+    'Edward': 'en', 'Pixie': 'en', 'Ronald': 'en', 'Sarah': 'en', 'Timothy': 'en',
+    'Wendy': 'en',
+    # Portuguese
+    'sony': 'pt', 'Heitor': 'pt', 'Maitê': 'pt',
+    # Spanish
+    'Diego': 'es', 'Lupita': 'es', 'Miguel': 'es', 'Rafael': 'es',
+    # French
+    'Alain': 'fr', 'Étienne': 'fr', 'Hélène': 'fr', 'Mathieu': 'fr',
+    # German
+    'Johanna': 'de', 'Josef': 'de',
+    # Japanese
+    'Asuka': 'ja', 'Satoshi': 'ja',
+    # Korean
+    'Hyunwoo': 'ko', 'Minji': 'ko', 'Seojun': 'ko', 'Yoona': 'ko',
+    # Chinese
+    'Jing': 'zh', 'Xiaoyin': 'zh', 'Xinyi': 'zh', 'Yichen': 'zh',
+    # Russian
+    'Dmitry': 'ru', 'Elena': 'ru', 'Nikolai': 'ru', 'Svetlana': 'ru',
+    # Dutch
+    'Erik': 'nl', 'Katrien': 'nl', 'Lennart': 'nl', 'Lore': 'nl',
+    # Italian
+    'Gianni': 'it', 'Orietta': 'it',
+    # Arabic
+    'Nour': 'ar', 'Omar': 'ar',
+    # Hebrew
+    'Oren': 'he', 'Yael': 'he',
+    # Hindi
+    'Manoj': 'hi', 'Riya': 'hi',
+    # Polish
+    'Szymon': 'pl', 'Wojciech': 'pl',
+}
+
+# Idiomas para o menu
 IDIOMAS = {
-    'pt': '🇧🇷 Português',
+    'all': '🌍 Todas',
     'en': '🇺🇸 English',
+    'pt': '🇧🇷 Português',
     'es': '🇪🇸 Español',
     'fr': '🇫🇷 Français',
     'de': '🇩🇪 Deutsch',
-    'it': '🇮🇹 Italiano',
     'ja': '🇯🇵 日本語',
     'ko': '🇰🇷 한국어',
     'zh': '🇨🇳 中文',
+    'ru': '🇷🇺 Русский',
 }
 
 # Cache de vozes
@@ -123,8 +162,16 @@ def fetch_voices(filtro_idioma: str = None) -> List[dict]:
             return []
     
     # Filtra por idioma se especificado
-    if filtro_idioma:
-        voices = [v for v in voices if filtro_idioma in v.get('languages', [])]
+    if filtro_idioma and filtro_idioma != 'all':
+        filtered = []
+        for v in voices:
+            name = v.get('displayName', '')
+            # Verifica se o nome da voz está no mapeamento e corresponde ao idioma
+            voice_lang = VOICE_LANGUAGES.get(name, '')
+            if voice_lang == filtro_idioma:
+                filtered.append(v)
+        voices = filtered
+        logger.info(f"🔍 Filtradas {len(voices)} vozes ({IDIOMAS.get(filtro_idioma, filtro_idioma)})")
     
     return voices
 
@@ -257,8 +304,15 @@ async def voices_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = "🎤 **Vozes Disponíveis:**\n\n"
     for i, voice in enumerate(voices[:15], 1):
         name = voice.get('displayName', 'Sem nome')
-        langs = ', '.join(voice.get('languages', [])[:2])
-        texto += f"`{i}.` **{name}** ({langs})\n"
+        # Usa o mapeamento para mostrar o idioma
+        lang_code = VOICE_LANGUAGES.get(name, '')
+        lang_name = IDIOMAS.get(lang_code, '❓').split(' ')[-1] if lang_code else '❓'
+        tags = voice.get('tags', [])[:2]
+        
+        # Mostra idioma (do mapeamento) ou tags
+        info = lang_name if lang_name != '❓' else ', '.join(tags)
+        
+        texto += f"`{i}.` **{name}** ({info})\n"
     
     if len(voices) > 15:
         texto += f"\n_...e mais {len(voices) - 15} vozes_\n"
@@ -269,7 +323,7 @@ async def voices_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def idioma_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu de seleção de idioma"""
+    """Menu de seleção/filtro de vozes"""
     keyboard = []
     row = []
     
@@ -285,7 +339,8 @@ async def idioma_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🌍 **Escolha o idioma das vozes:**",
+        "🌍 **Filtrar vozes por idioma:**\n\n"
+        "Selecione um idioma para ver as vozes disponíveis:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -297,8 +352,8 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_voice = user_voices.get(user_id, DEFAULT_VOICE)
     current_name = current_voice.split('__')[-1] if '__' in current_voice else current_voice
     
-    # Busca vozes para português por padrão
-    voices = fetch_voices('pt')[:9]  # Máximo 9 para caber nos botões
+    # Busca todas as vozes (sem filtro de idioma)
+    voices = fetch_voices()[:9]  # Máximo 9 para caber nos botões
     
     if not voices:
         await update.message.reply_text("❌ Erro ao carregar vozes.")
@@ -349,12 +404,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     
     if data.startswith("idioma:"):
-        # Selecionou idioma -> mostra vozes desse idioma
-        idioma = data.split(":")[1]
-        voices = fetch_voices(idioma)
+        # Selecionou filtro -> mostra vozes filtradas
+        filtro = data.split(":")[1]
+        voices = fetch_voices(filtro)
         
         if not voices:
-            await query.edit_message_text(f"❌ Nenhuma voz encontrada para {IDIOMAS.get(idioma, idioma)}")
+            await query.edit_message_text(f"❌ Nenhuma voz encontrada para '{IDIOMAS.get(filtro, filtro)}'")
             return
         
         keyboard = []
@@ -378,8 +433,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        filtro_nome = IDIOMAS.get(filtro, filtro)
         await query.edit_message_text(
-            f"🎤 **Vozes em {IDIOMAS.get(idioma, idioma)}:**\n\nEscolha uma:",
+            f"🎤 **{len(voices)} vozes ({filtro_nome}):**\n\nEscolha uma:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
