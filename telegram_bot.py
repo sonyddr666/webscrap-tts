@@ -53,7 +53,27 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 user_voices: Dict[int, str] = {}
 
 # Voz padrão
+# Voz padrão
 DEFAULT_VOICE = os.getenv("TTS_VOICE_ID", "default--pb4bm1oowkem_r9ri2wiw__sony")
+
+# Modelos disponíveis
+MODELOS = {
+    'inworld-tts-1.5-max': '🚀 1.5 Max (Melhor Qualidade)',
+    'inworld-tts-1.5-mini': '⚡ 1.5 Mini (Rápido)',
+    'inworld-tts-1-max': 'v1 Max',
+    'inworld-tts-1': 'v1 Standard'
+}
+DEFAULT_MODEL = 'inworld-tts-1.5-max'
+
+# Modelo atual por usuário (user_id -> model_id)
+user_models: Dict[int, str] = {}
+
+# Configurações de áudio por usuário (user_id -> dict)
+# { 'speed': 1.0, 'pitch': 0.0 }
+user_settings: Dict[int, Dict[str, float]] = {}
+DEFAULT_SPEED = 1.0
+DEFAULT_PITCH = 0.0
+
 
 # Mapeamento de vozes por idioma (baseado na documentação Inworld)
 VOICE_LANGUAGES = {
@@ -233,23 +253,24 @@ def fetch_voices(filtro_idioma: str = None) -> List[dict]:
     return voices
 
 
-def generate_audio_direct(text: str, voice_id: str, filename: Path) -> Optional[str]:
+def generate_audio_direct(text: str, voice_id: str, filename: Path, model_id: str = DEFAULT_MODEL, speed: float = 1.0, pitch: float = 0.0) -> Optional[str]:
     """Gera áudio usando a API TTS"""
     url = f"{BASE_URL}/tts/v1/voice"
     
     payload = {
         "text": text,
         "voice_id": voice_id,
-        "model_id": "inworld-tts-1.5-max",
+        "model_id": model_id,
         "audio_config": {
             "audio_encoding": "MP3",
-            "speaking_rate": 1,
+            "speaking_rate": speed,
+            "pitch": pitch,
             "sample_rate_hertz": 48000
         },
         "temperature": 1.0
     }
     
-    logger.info(f"🎙️ Gerando: '{text[:40]}...' com voz {voice_id[-20:]}")
+    logger.info(f"🎙️ Gerando ({model_id} | ⏩{speed} | 🎵{pitch}): '{text[:30]}...' com voz {voice_id[-15:]}")
     time.sleep(random.uniform(0.3, 0.8))
     
     response = requests.post(url, headers=get_headers(), json=payload, timeout=60)
@@ -299,13 +320,19 @@ async def queue_worker():
             update = item['update']
             texto = item['texto']
             voice_id = item['voice_id']
+            model_id = item.get('model_id', DEFAULT_MODEL)
             user = update.effective_user
+            
+            # Obtém settings do usuário ou padrão
+            settings = user_settings.get(user.id, {'speed': DEFAULT_SPEED, 'pitch': DEFAULT_PITCH})
+            speed = settings.get('speed', DEFAULT_SPEED)
+            pitch = settings.get('pitch', DEFAULT_PITCH)
             
             # Gera o áudio
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = OUTPUT_DIR / f"tg_{user.id}_{timestamp}.mp3"
             
-            resultado = generate_audio_direct(texto, voice_id, filename)
+            resultado = generate_audio_direct(texto, voice_id, filename, model_id, speed, pitch)
             
             if resultado and os.path.exists(resultado):
                 with open(resultado, 'rb') as audio_file:
@@ -353,6 +380,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /voices - Lista vozes\n"
         "• /voice - Trocar voz\n"
         "• /idioma - Filtrar por idioma\n"
+        "• /model - Alterar modelo TTS\n"
+        "• /speed - Ajustar Velocidade\n"
+        "• /pitch - Ajustar Tom\n"
         "• /token - Renovar token\n\n"
         f"🎤 Voz atual: `{voice_name}`",
         parse_mode="Markdown"
@@ -441,6 +471,79 @@ async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu para configurar velocidade"""
+    user_id = update.effective_user.id
+    current = user_settings.get(user_id, {}).get('speed', DEFAULT_SPEED)
+    
+    # Botões de velocidade
+    keyboard = [
+        [
+            InlineKeyboardButton("0.5x", callback_data="speed:0.5"),
+            InlineKeyboardButton("0.8x", callback_data="speed:0.8"),
+            InlineKeyboardButton("1.0x", callback_data="speed:1.0"),
+        ],
+        [
+            InlineKeyboardButton("1.2x", callback_data="speed:1.2"),
+            InlineKeyboardButton("1.5x", callback_data="speed:1.5"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"⏩ **Velocidade Atual:** `{current}`\n\n"
+        "Selecione a nova velocidade:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+async def pitch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu para configurar tom"""
+    user_id = update.effective_user.id
+    current = user_settings.get(user_id, {}).get('pitch', DEFAULT_PITCH)
+    
+    # Botões de pitch
+    keyboard = [
+        [
+            InlineKeyboardButton("Grave (-5)", callback_data="pitch:-5.0"),
+            InlineKeyboardButton("Médio (-2)", callback_data="pitch:-2.0"),
+        ],
+        [
+            InlineKeyboardButton("Normal (0)", callback_data="pitch:0.0"),
+        ],
+        [
+            InlineKeyboardButton("Agudo (+2)", callback_data="pitch:2.0"),
+            InlineKeyboardButton("Esquilo (+5)", callback_data="pitch:5.0"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"🎵 **Tom Atual:** `{current}`\n\n"
+        "Selecione o novo tom:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu para trocar modelo TTS"""
+    user_id = update.effective_user.id
+    current_model = user_models.get(user_id, DEFAULT_MODEL)
+    
+    keyboard = []
+    for model_id, name in MODELOS.items():
+        prefix = "✅ " if model_id == current_model else ""
+        keyboard.append([InlineKeyboardButton(f"{prefix}{name}", callback_data=f"model:{model_id}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"🤖 **Modelo Atual:** `{MODELOS.get(current_model, current_model)}`\n\n"
+        "Selecione o modelo de geração:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
 async def idioma_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menu de seleção/filtro de vozes"""
     keyboard = []
@@ -522,6 +625,40 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
     
+    if data.startswith("model:"):
+        # Selecionou modelo
+        model_id = data.split(":", 1)[1]
+        if model_id in MODELOS:
+            user_models[user_id] = model_id
+            await query.edit_message_text(
+                f"✅ **Modelo alterado!**\n\n🤖 Novo modelo: `{MODELOS[model_id]}`",
+                parse_mode="Markdown"
+            )
+            logger.info(f"🤖 {query.from_user.first_name} trocou modelo para: {model_id}")
+        return
+
+    if data.startswith("speed:"):
+        # Alterou velocidade
+        valor = float(data.split(":")[1])
+        if user_id not in user_settings: user_settings[user_id] = {}
+        user_settings[user_id]['speed'] = valor
+        await query.edit_message_text(
+            f"✅ **Velocidade definida!**\n\n⏩ Valor: `{valor}`",
+            parse_mode="Markdown"
+        )
+        return
+
+    if data.startswith("pitch:"):
+        # Alterou tom
+        valor = float(data.split(":")[1])
+        if user_id not in user_settings: user_settings[user_id] = {}
+        user_settings[user_id]['pitch'] = valor
+        await query.edit_message_text(
+            f"✅ **Tom definido!**\n\n🎵 Valor: `{valor}`",
+            parse_mode="Markdown"
+        )
+        return
+
     if data.startswith("idioma:"):
         # Selecionou filtro -> mostra vozes filtradas
         filtro = data.split(":")[1]
@@ -591,6 +728,7 @@ async def processar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user = update.effective_user
     voice_id = user_voices.get(user.id, DEFAULT_VOICE)
+    model_id = user_models.get(user.id, DEFAULT_MODEL)
     
     logger.info(f"📩 {user.first_name}: {texto[:40]}...")
     
@@ -600,7 +738,8 @@ async def processar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await audio_queue.put({
         'update': update,
         'texto': texto,
-        'voice_id': voice_id
+        'voice_id': voice_id,
+        'model_id': model_id
     })
     
     if queue_size > 0:
@@ -627,7 +766,7 @@ def main():
 ║                                                              ║
 ║   🤖 TELEGRAM TTS BOT v3                                     ║
 ║                                                              ║
-║   Comandos: /voice /voices /idioma /token                    ║
+║   Comandos: /voice /voices /idioma /token /model             ║
 ║   Queue de áudio ativada                                     ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -651,6 +790,9 @@ def main():
     app.add_handler(CommandHandler("voices", voices_command))
     app.add_handler(CommandHandler("voice", voice_command))
     app.add_handler(CommandHandler("idioma", idioma_command))
+    app.add_handler(CommandHandler("model", model_command))
+    app.add_handler(CommandHandler("speed", speed_command))
+    app.add_handler(CommandHandler("pitch", pitch_command))
     app.add_handler(CommandHandler("token", token_command))
     
     # Callbacks (botões)
