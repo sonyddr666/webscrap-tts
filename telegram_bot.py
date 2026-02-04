@@ -72,7 +72,7 @@ def get_headers():
 
 def generate_audio_direct(text: str, voice_id: str, filename: Path) -> str:
     """Gera áudio usando a API TTS diretamente"""
-    url = f"{BASE_URL}/tts/v1/workspaces/{WORKSPACE_ID}/tts:synthesize"
+    url = f"{BASE_URL}/tts/v1/voice"
     
     payload = {
         "text": text,
@@ -87,29 +87,51 @@ def generate_audio_direct(text: str, voice_id: str, filename: Path) -> str:
     }
     
     logger.info(f"🎙️ Gerando áudio: '{text[:50]}...'")
+    logger.info(f"📡 URL: {url} | Voice: {voice_id}")
     
     # Delay humano
     time.sleep(random.uniform(0.5, 1.5))
     
     response = requests.post(url, headers=get_headers(), json=payload, timeout=60)
-    response.raise_for_status()
+    
+    # Log detalhado
+    logger.info(f"📡 Status: {response.status_code}")
+    
+    if response.status_code != 200:
+        logger.error(f"❌ Erro da API: {response.status_code} - {response.text[:500]}")
+        return None
     
     content_type = response.headers.get('Content-Type', '')
     
     # Processa resposta (JSON com Base64 ou bytes brutos)
     if 'application/json' in content_type:
         data = response.json()
+        
+        # Verifica erro na resposta
+        if 'error' in data:
+            logger.error(f"❌ API retornou erro: {data['error']}")
+            return None
+        
         if 'audioContent' in data:
             audio_bytes = base64.b64decode(data['audioContent'])
+            
+            if len(audio_bytes) < 100:
+                logger.error(f"❌ Áudio vazio ou muito pequeno ({len(audio_bytes)} bytes)")
+                return None
+            
             with open(filename, "wb") as f:
                 f.write(audio_bytes)
             logger.info(f"✅ Áudio salvo: {filename} ({len(audio_bytes)/1024:.1f} KB)")
             return str(filename)
         else:
-            logger.error(f"JSON sem 'audioContent': {list(data.keys())}")
+            logger.error(f"❌ Resposta sem 'audioContent': {list(data.keys())}")
+            logger.error(f"📄 Resposta: {str(data)[:300]}")
             return None
     else:
         # Bytes brutos
+        if len(response.content) < 100:
+            logger.error(f"❌ Resposta vazia ({len(response.content)} bytes)")
+            return None
         with open(filename, "wb") as f:
             f.write(response.content)
         logger.info(f"✅ Áudio salvo: {filename} ({len(response.content)/1024:.1f} KB)")
