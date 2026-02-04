@@ -33,6 +33,13 @@ WORKSPACE_ID = os.getenv("WORKSPACE_ID", "default--pb4bm1oowkem_r9ri2wiw")
 BASE_URL = "https://api.inworld.ai"
 DELAY_DELETE_SEGUNDOS = 50
 
+# Firebase Token Refresh
+FIREBASE_API_KEY = "AIzaSyAPVBLVid0xPwjuU4Gmn_6_GyqxBq-SwQs"
+FIREBASE_REFRESH_TOKEN = os.getenv("FIREBASE_REFRESH_TOKEN", "AMf-vBwyj4N9ZYArutxdUilFu4K5FZJLbZEPHy9tLAoYpZ5x2pghrG-_zqL05jF7J7K7Tcp7X6xBeiFFYheTdNcmEoHVkqX8T-HcNVSI95wCDSuYLhkszY4ouqUlZNr7egpcIfzaMBeXiphxhjgyzg49kQxdiGsUIMxDEWqDZMEdKHcJxCGIZVT9JkqCata_tDIxGGwCJN5kSWudqKBHFyLW8Pw9wXcRUFJBNIzVGHyeN2D3YE23Zy9J2-oszN-75NCKpEjiKE-PhryyAhtu26NrWOxZdRfvWf59KM_Vas5tjfjrK_SRBQ1wcfyiOvP400Gl68nWCYWOInCjOAQqEgxB3n3d6hC7U9GInetcdP4uHOla8XcQy3hYwTXjJ-S1sPTe8FBiSj3hEtGsEZ7Gt5SCRIIGWtBcD48lYNbiyQcIXvPHpvhDznDgZXkyp74QF7UR1CMQLzgT")
+
+# Token atual (pode ser renovado)
+current_token = INWORLD_TOKEN
+
 # Diretórios
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
@@ -116,7 +123,7 @@ queue_worker_task = None
 # ============================================================
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s | %(levelname)-8s | %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -130,9 +137,59 @@ USER_AGENTS = [
 # FUNÇÕES API INWORLD
 # ============================================================
 
+def refresh_firebase_token():
+    """Renova o accessToken usando o refreshToken do Firebase"""
+    try:
+        url = f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_API_KEY}"
+        payload = {"grant_type": "refresh_token", "refresh_token": FIREBASE_REFRESH_TOKEN}
+        response = requests.post(url, data=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("id_token")
+    except Exception as e:
+        logger.error(f"Erro ao renovar Firebase token: {e}")
+    return None
+
+
+def refresh_inworld_token():
+    """Gera novo token Inworld TTS usando Firebase"""
+    global current_token
+    
+    firebase_token = refresh_firebase_token()
+    if not firebase_token:
+        logger.error("❌ Falha ao obter Firebase token")
+        return None
+    
+    try:
+        # Endpoint correto que gera token com scope we:tts
+        url = f"https://platform.inworld.ai/ai/inworld/portal/v1alpha/workspaces/{WORKSPACE_ID}/token:generate"
+        headers = {
+            "authorization": f"Bearer {firebase_token}",
+            "content-type": "text/plain;charset=UTF-8",
+            "grpc-metadata-x-authorization-bearer-type": "firebase",
+            "origin": "https://platform.inworld.ai",
+            "referer": f"https://platform.inworld.ai/v2/workspaces/{WORKSPACE_ID}/tts-playground",
+        }
+        payload = json.dumps({})
+        response = requests.post(url, headers=headers, data=payload, timeout=30)
+        
+        if response.status_code == 200:
+            new_token = response.json().get("token")
+            if new_token:
+                current_token = new_token
+                logger.info("✅ Token TTS renovado com sucesso!")
+                return new_token
+        else:
+            logger.error(f"❌ Erro ao gerar token: {response.status_code} - {response.text[:200]}")
+    except Exception as e:
+        logger.error(f"Erro ao gerar token Inworld: {e}")
+    return None
+
+
 def get_headers():
+    global current_token
+    logger.debug(f"🔑 Usando token: {current_token[:50]}..." if current_token else "❌ SEM TOKEN!")
     return {
-        "Authorization": f"Bearer {INWORLD_TOKEN}",
+        "Authorization": f"Bearer {current_token}",
         "Content-Type": "application/json",
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/json, text/plain, */*",
@@ -199,6 +256,11 @@ def generate_audio_direct(text: str, voice_id: str, filename: Path) -> Optional[
     
     if response.status_code != 200:
         logger.error(f"❌ API erro: {response.status_code}")
+        logger.debug(f"📋 Headers: {dict(response.headers)}")
+        try:
+            logger.error(f"📋 Response: {response.text[:500]}")
+        except:
+            pass
         return None
     
     data = response.json()
@@ -284,7 +346,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**Comandos:**\n"
         "• /voices - Lista vozes\n"
         "• /voice - Trocar voz\n"
-        "• /idioma - Filtrar por idioma\n\n"
+        "• /idioma - Filtrar por idioma\n"
+        "• /token - Renovar token\n\n"
         f"🎤 Voz atual: `{voice_name}`",
         parse_mode="Markdown"
     )
@@ -321,6 +384,56 @@ async def voices_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(texto, parse_mode="Markdown")
 
+
+async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Renova o token Inworld manualmente"""
+    await update.message.reply_text("🔄 Renovando token Inworld...")
+    
+    new_token = refresh_inworld_token()
+    
+    if new_token:
+        await update.message.reply_text(
+            "✅ **Token renovado com sucesso!**\n\n"
+            f"📋 Token (primeiros 50 chars):\n`{new_token[:50]}...`",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            "❌ **Falha ao renovar token!**\n\n"
+            "Verifique se o FIREBASE_REFRESH_TOKEN está válido.",
+            parse_mode="Markdown"
+        )
+
+
+async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Define token manualmente copiado do F12"""
+    global current_token
+    
+    if not context.args:
+        await update.message.reply_text(
+            "🔑 **Colar Token Manualmente**\n\n"
+            "Use: `/settoken SEU_TOKEN_AQUI`\n\n"
+            "Copie o token do F12 (Authorization header) e cole após o comando.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    new_token = context.args[0]
+    
+    # Validação básica
+    if not new_token.startswith("eyJ"):
+        await update.message.reply_text("❌ Token inválido! Deve começar com 'eyJ'")
+        return
+    
+    current_token = new_token
+    logger.info(f"🔑 Token atualizado manualmente!")
+    
+    await update.message.reply_text(
+        "✅ **Token atualizado!**\n\n"
+        f"📋 Token: `{new_token[:40]}...`\n\n"
+        "Agora tente enviar um texto para testar!",
+        parse_mode="Markdown"
+    )
 
 async def idioma_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menu de seleção/filtro de vozes"""
@@ -508,7 +621,7 @@ def main():
 ║                                                              ║
 ║   🤖 TELEGRAM TTS BOT v3                                     ║
 ║                                                              ║
-║   Comandos: /voice /voices /idioma                           ║
+║   Comandos: /voice /voices /idioma /token                    ║
 ║   Queue de áudio ativada                                     ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -532,6 +645,7 @@ def main():
     app.add_handler(CommandHandler("voices", voices_command))
     app.add_handler(CommandHandler("voice", voice_command))
     app.add_handler(CommandHandler("idioma", idioma_command))
+    app.add_handler(CommandHandler("token", token_command))
     
     # Callbacks (botões)
     app.add_handler(CallbackQueryHandler(callback_handler))
