@@ -72,7 +72,7 @@ def get_headers():
 
 def generate_audio_direct(text: str, voice_id: str, filename: Path) -> str:
     """Gera áudio usando a API TTS diretamente"""
-    url = f"{BASE_URL}/tts/v1/voice"
+    url = f"{BASE_URL}/tts/v1/workspaces/{WORKSPACE_ID}/tts:synthesize"
     
     payload = {
         "text": text,

@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  # Bot do Telegram (principal)
+  telegram-bot:
+    build: .
+    container_name: inworld-tts-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persiste os áudios gerados
+      - ./output:/app/output
+    environment:
+      - TZ=America/Sao_Paulo
+  # Scraper CLI (opcional - para uso interativo)
+  # Descomente para rodar: docker compose run --rm scraper
+  # scraper:
+  #   build: .
+  #   container_name: inworld-tts-scraper
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./output:/app/output
+  #   command: ["python", "webscrap_tts.py"]
+  #   stdin_open: true
+  #   tty: true

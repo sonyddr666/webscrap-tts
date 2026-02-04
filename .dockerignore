@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+
+# Output (será montado via volume)
+output/
+
+# Ambiente
+.env
+.venv
+venv
+
+# IDE
+.vscode
+.idea
+
+# Docs
+*.md
+!README.md

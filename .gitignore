@@ -1,0 +1,22 @@
+# Ambiente (NUNCA SUBIR!)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Áudios gerados
+output/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Virtualenv
+.venv/
+venv/

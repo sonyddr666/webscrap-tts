@@ -325,7 +325,7 @@ def list_voices(filtro_idioma=None):
 @retry_com_backoff(max_tentativas=3)
 def generate_audio(text, voice_id, filename=None):
     """Gera áudio usando a API TTS"""
-    url = f"{BASE_URL}/tts/v1/voice"
+    url = f"{BASE_URL}/tts/v1/workspaces/{WORKSPACE_ID}/tts:synthesize"
     
     # Gera nome de arquivo automático se não fornecido
     if filename is None:
