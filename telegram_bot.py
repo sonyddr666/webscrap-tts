@@ -132,6 +132,31 @@ voices_cache: List[dict] = []
 voices_cache_time: float = 0
 
 # ============================================================
+# VOICE CLONING - ESTADO
+# ============================================================
+
+# Estado do processo de clone por usuário
+# user_id -> {'step': 'nome'|'idioma'|'audio', 'name': str, 'lang': str, 'files': []}
+clone_sessions: Dict[int, dict] = {}
+
+# Diretório para uploads de áudio
+CLONE_UPLOAD_DIR = BASE_DIR / "clone_uploads"
+CLONE_UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Idiomas para clone
+CLONE_LANGUAGES = {
+    'pt': ('PT_BR', '🇧🇷 Português'),
+    'en': ('EN_US', '🇺🇸 English'),
+    'es': ('ES_ES', '🇪🇸 Español'),
+    'fr': ('FR_FR', '🇫🇷 Français'),
+    'de': ('DE_DE', '🇩🇪 Deutsch'),
+    'ja': ('JA_JP', '🇯🇵 日本語'),
+    'ko': ('KO_KR', '🇰🇷 한국어'),
+    'zh': ('ZH_CN', '🇨🇳 中文'),
+    'ru': ('RU_RU', '🇷🇺 Русский'),
+}
+
+# ============================================================
 # QUEUE DE ÁUDIO
 # ============================================================
 
@@ -302,6 +327,90 @@ def generate_audio_direct(text: str, voice_id: str, filename: Path, model_id: st
 
 
 # ============================================================
+# VOICE CLONING - FUNÇÕES DA API
+# ============================================================
+
+def audio_to_base64(audio_path: str) -> str:
+    """Converte arquivo de áudio para Base64"""
+    with open(audio_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+
+def clone_voice_api(display_name: str, lang_code: str, audio_files: list, description: str = "") -> dict:
+    """
+    Clona uma voz usando a API Inworld
+    
+    Args:
+        display_name: Nome da nova voz
+        lang_code: Código do idioma (PT_BR, EN_US, etc.)
+        audio_files: Lista de caminhos para arquivos de áudio
+        description: Descrição opcional
+    
+    Returns:
+        dict com dados da voz criada ou None
+    """
+    url = f"{BASE_URL}/voices/v1/workspaces/{WORKSPACE_ID}/voices:clone"
+    
+    samples = []
+    total_size = 0
+    
+    for audio_path in audio_files:
+        path = Path(audio_path)
+        if not path.exists():
+            logger.warning(f"⚠️ Arquivo não encontrado: {audio_path}")
+            continue
+        
+        file_size = path.stat().st_size
+        total_size += file_size
+        
+        logger.info(f"📁 Processando: {path.name} ({file_size/1024:.1f} KB)")
+        
+        samples.append({
+            "title": path.name,
+            "audioData": audio_to_base64(audio_path)
+        })
+    
+    if not samples:
+        logger.error("❌ Nenhum arquivo de áudio válido!")
+        return None
+    
+    logger.info(f"📦 Total: {len(samples)} arquivos ({total_size/1024:.1f} KB)")
+    
+    payload = {
+        "parent": f"workspaces/{WORKSPACE_ID}",
+        "displayName": display_name,
+        "langCode": lang_code,
+        "description": description,
+        "voiceSamples": samples
+    }
+    
+    logger.info(f"🎭 Clonando voz '{display_name}' ({lang_code})...")
+    logger.info(f"⏳ Isso pode demorar de 30 segundos a 3 minutos...")
+    
+    try:
+        # Timeout alto porque clone demora!
+        response = requests.post(url, headers=get_headers(), json=payload, timeout=300)
+        
+        if response.status_code == 200:
+            data = response.json()
+            voice = data.get("voice", {})
+            logger.info(f"✅ Voz clonada: {voice.get('displayName')} - {voice.get('voiceId')}")
+            return data
+        else:
+            logger.error(f"❌ Erro ao clonar: {response.status_code}")
+            logger.error(response.text[:500])
+            return None
+    except Exception as e:
+        logger.error(f"❌ Exceção no clone: {e}")
+        return None
+
+
+def list_custom_voices() -> list:
+    """Lista apenas vozes clonadas (source: IVC)"""
+    voices = fetch_voices()
+    return [v for v in voices if v.get("source") == "IVC"]
+
+
 # QUEUE WORKER
 # ============================================================
 
@@ -374,9 +483,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice_name = voice.split('__')[-1] if '__' in voice else voice
     
     await update.message.reply_text(
-        "🎙️ **Bot TTS Inworld AI v3**\n\n"
+        "🎙️ **Bot TTS Inworld AI v4**\n\n"
         "Envie texto para gerar áudio!\n\n"
-        "**Comandos:**\n"
+        "**Comandos TTS:**\n"
         "• /voices - Lista vozes\n"
         "• /voice - Trocar voz\n"
         "• /idioma - Filtrar por idioma\n"
@@ -384,6 +493,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /speed - Ajustar Velocidade\n"
         "• /pitch - Ajustar Tom\n"
         "• /token - Renovar token\n\n"
+        "**🎭 Voice Cloning:**\n"
+        "• /clonar - Criar voz personalizada\n"
+        "• /minhasvozes - Ver vozes clonadas\n"
+        "• /cancelar - Cancelar clonagem\n\n"
         f"🎤 Voz atual: `{voice_name}`",
         parse_mode="Markdown"
     )
@@ -608,9 +721,217 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🎤 **Voz atual:** `{current_name}`\n\n"
         "Escolha uma nova voz:",
-        reply_markup=reply_markup,
         parse_mode="Markdown"
     )
+
+
+# ============================================================
+# VOICE CLONING - COMANDOS
+# ============================================================
+
+async def clonar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia processo de clone de voz"""
+    user_id = update.effective_user.id
+    
+    # Limpa sessão anterior se existir
+    if user_id in clone_sessions:
+        del clone_sessions[user_id]
+    
+    # Cria nova sessão
+    clone_sessions[user_id] = {
+        'step': 'nome',
+        'name': None,
+        'lang': None,
+        'lang_code': None,
+        'files': []
+    }
+    
+    await update.message.reply_text(
+        "🎭 **CLONAR VOZ**\n\n"
+        "Vou guiar você pelo processo de clonagem!\n\n"
+        "**Passo 1/3:** Digite o nome para a nova voz:\n\n"
+        "_Exemplo: MinhaVoz, VozCustomizada, etc._\n\n"
+        "Use /cancelar para abortar.",
+        parse_mode="Markdown"
+    )
+
+
+async def minhasvozes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista vozes clonadas do usuário"""
+    await update.message.reply_text("🔍 Buscando suas vozes clonadas...")
+    
+    voices = list_custom_voices()
+    
+    if not voices:
+        await update.message.reply_text(
+            "📭 **Nenhuma voz clonada encontrada!**\n\n"
+            "Use /clonar para criar sua primeira voz.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Cria botões para selecionar voz clonada
+    keyboard = []
+    row = []
+    
+    for voice in voices[:12]:
+        name = voice.get('displayName', '?')[:12]
+        voice_id = voice.get('voiceId', '')
+        
+        row.append(InlineKeyboardButton(
+            f"🎭 {name}",
+            callback_data=f"voice:{voice_id}"
+        ))
+        
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    
+    if row:
+        keyboard.append(row)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    texto = f"🎭 **Suas Vozes Clonadas ({len(voices)}):**\n\n"
+    for v in voices[:10]:
+        texto += f"• **{v.get('displayName')}** ({v.get('langCode')})\n"
+        texto += f"  `{v.get('voiceId')}`\n\n"
+    
+    if len(voices) > 10:
+        texto += f"_...e mais {len(voices) - 10} vozes_\n"
+    
+    texto += "\n💡 Clique para selecionar uma voz:"
+    
+    await update.message.reply_text(texto, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def cancelar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancela processo de clone em andamento"""
+    user_id = update.effective_user.id
+    
+    if user_id in clone_sessions:
+        # Limpa arquivos temporários
+        session = clone_sessions[user_id]
+        for file_path in session.get('files', []):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except:
+                pass
+        
+        del clone_sessions[user_id]
+        await update.message.reply_text("❌ Processo de clonagem cancelado.")
+    else:
+        await update.message.reply_text("ℹ️ Nenhum processo de clonagem em andamento.")
+
+
+async def processar_clone_steps(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Processa passos do clone de voz quando usuário está em sessão
+    Retorna True se processou mensagem de clone, False caso contrário
+    """
+    user_id = update.effective_user.id
+    
+    if user_id not in clone_sessions:
+        return False
+    
+    session = clone_sessions[user_id]
+    step = session.get('step')
+    text = update.message.text.strip() if update.message.text else None
+    
+    # PASSO 1: Nome da voz
+    if step == 'nome' and text:
+        # Valida nome (sem espaços, caracteres especiais)
+        nome_limpo = "".join(c for c in text if c.isalnum() or c == '_')[:20]
+        
+        if len(nome_limpo) < 2:
+            await update.message.reply_text(
+                "⚠️ Nome muito curto ou inválido.\n"
+                "Use apenas letras, números e _ (mínimo 2 caracteres)."
+            )
+            return True
+        
+        session['name'] = nome_limpo
+        session['step'] = 'idioma'
+        
+        # Menu de idiomas
+        keyboard = []
+        row = []
+        for code, (lang_code, lang_name) in CLONE_LANGUAGES.items():
+            row.append(InlineKeyboardButton(lang_name, callback_data=f"clone_lang:{code}"))
+            if len(row) == 3:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ Nome: **{nome_limpo}**\n\n"
+            "**Passo 2/3:** Selecione o idioma da voz:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return True
+    
+    return False
+
+
+async def processar_audio_clone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processa uploads de áudio para clone de voz"""
+    user_id = update.effective_user.id
+    
+    if user_id not in clone_sessions:
+        return
+    
+    session = clone_sessions[user_id]
+    
+    if session.get('step') != 'audio':
+        return
+    
+    # Obtém arquivo de áudio (voice ou audio ou document)
+    audio_file = None
+    file_name = None
+    
+    if update.message.voice:
+        audio_file = update.message.voice
+        file_name = f"voice_{user_id}_{len(session['files'])}.ogg"
+    elif update.message.audio:
+        audio_file = update.message.audio
+        file_name = update.message.audio.file_name or f"audio_{user_id}_{len(session['files'])}.mp3"
+    elif update.message.document:
+        doc = update.message.document
+        if doc.mime_type and 'audio' in doc.mime_type:
+            audio_file = doc
+            file_name = doc.file_name or f"doc_{user_id}_{len(session['files'])}.mp3"
+    
+    if not audio_file:
+        return
+    
+    try:
+        # Baixa o arquivo
+        file = await audio_file.get_file()
+        file_path = CLONE_UPLOAD_DIR / file_name
+        await file.download_to_drive(file_path)
+        
+        session['files'].append(str(file_path))
+        num_files = len(session['files'])
+        
+        await update.message.reply_text(
+            f"✅ Áudio {num_files} recebido!\n\n"
+            f"📁 Arquivos: {num_files}\n\n"
+            "Envie mais áudios ou clique em **Finalizar** para clonar:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎭 Finalizar e Clonar", callback_data="clone_finish")],
+                [InlineKeyboardButton("❌ Cancelar", callback_data="clone_cancel")]
+            ]),
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Erro ao baixar áudio: {e}")
+        await update.message.reply_text(f"❌ Erro ao processar áudio: {e}")
 
 
 # ============================================================
@@ -708,6 +1029,126 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         logger.info(f"🔄 {query.from_user.first_name} trocou voz para: {voice_name}")
+    
+    # ============================================================
+    # VOICE CLONING CALLBACKS
+    # ============================================================
+    
+    elif data.startswith("clone_lang:"):
+        # Selecionou idioma para clone
+        lang_code_short = data.split(":")[1]
+        
+        if user_id not in clone_sessions:
+            await query.edit_message_text("❌ Sessão expirada. Use /clonar novamente.")
+            return
+        
+        session = clone_sessions[user_id]
+        
+        if lang_code_short in CLONE_LANGUAGES:
+            lang_code, lang_name = CLONE_LANGUAGES[lang_code_short]
+            session['lang'] = lang_code_short
+            session['lang_code'] = lang_code
+            session['step'] = 'audio'
+            
+            await query.edit_message_text(
+                f"✅ Nome: **{session['name']}**\n"
+                f"✅ Idioma: **{lang_name}**\n\n"
+                "**Passo 3/3:** Envie os arquivos de áudio para clonar!\n\n"
+                "📎 Formatos aceitos: MP3, WAV, OGG\n"
+                "⏱️ Duração mínima: 30 segundos total\n"
+                "📁 Envie quantos áudios quiser\n\n"
+                "_Quando terminar, clique em Finalizar._",
+                parse_mode="Markdown"
+            )
+    
+    elif data == "clone_finish":
+        # Finalizar clone
+        if user_id not in clone_sessions:
+            await query.edit_message_text("❌ Sessão expirada. Use /clonar novamente.")
+            return
+        
+        session = clone_sessions[user_id]
+        
+        if len(session.get('files', [])) == 0:
+            await query.edit_message_text(
+                "⚠️ Nenhum áudio enviado!\n\n"
+                "Envie pelo menos 1 arquivo de áudio antes de finalizar.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ Cancelar", callback_data="clone_cancel")]
+                ])
+            )
+            return
+        
+        await query.edit_message_text(
+            f"🔄 **CLONANDO VOZ...**\n\n"
+            f"📛 Nome: {session['name']}\n"
+            f"🌍 Idioma: {session['lang_code']}\n"
+            f"📁 Arquivos: {len(session['files'])}\n\n"
+            "⏳ **AGUARDE!** Este processo pode demorar:\n"
+            "   • 30 segundos a 3 minutos\n"
+            "   • Depende do tamanho dos áudios\n\n"
+            "☕ Relaxe enquanto a IA processa sua voz..."
+        )
+        
+        # Executa clone
+        result = clone_voice_api(
+            display_name=session['name'],
+            lang_code=session['lang_code'],
+            audio_files=session['files']
+        )
+        
+        # Limpa arquivos temporários
+        for file_path in session.get('files', []):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except:
+                pass
+        
+        # Remove sessão
+        del clone_sessions[user_id]
+        
+        if result:
+            voice = result.get("voice", {})
+            voice_id = voice.get("voiceId", "")
+            
+            # Define a voz clonada como voz atual
+            user_voices[user_id] = voice_id
+            
+            await query.edit_message_text(
+                "🎉 **VOZ CLONADA COM SUCESSO!**\n\n"
+                f"📛 Nome: **{voice.get('displayName')}**\n"
+                f"🌍 Idioma: {voice.get('langCode')}\n"
+                f"🆔 ID: `{voice_id}`\n\n"
+                "✅ Esta voz já foi selecionada!\n"
+                "Envie um texto para testar.",
+                parse_mode="Markdown"
+            )
+            logger.info(f"🎭 {query.from_user.first_name} clonou voz: {voice.get('displayName')}")
+        else:
+            await query.edit_message_text(
+                "❌ **Erro ao clonar voz!**\n\n"
+                "Possíveis causas:\n"
+                "• Token expirado (use /token)\n"
+                "• Áudio muito curto\n"
+                "• Formato não suportado\n\n"
+                "Tente novamente com /clonar",
+                parse_mode="Markdown"
+            )
+    
+    elif data == "clone_cancel":
+        # Cancelar clone
+        if user_id in clone_sessions:
+            session = clone_sessions[user_id]
+            for file_path in session.get('files', []):
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except:
+                    pass
+            del clone_sessions[user_id]
+        
+        await query.edit_message_text("❌ Clonagem cancelada.")
 
 
 # ============================================================
@@ -717,6 +1158,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def processar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Adiciona texto à fila de processamento"""
     global audio_queue
+    
+    # Verifica se está em processo de clone
+    if await processar_clone_steps(update, context):
+        return
     
     texto = update.message.text.strip()
     if not texto:
@@ -764,9 +1209,10 @@ def main():
     print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║   🤖 TELEGRAM TTS BOT v3                                     ║
+║   🤖 TELEGRAM TTS BOT v4 - COM VOICE CLONING                 ║
 ║                                                              ║
 ║   Comandos: /voice /voices /idioma /token /model             ║
+║             /clonar /minhasvozes /cancelar                   ║
 ║   Queue de áudio ativada                                     ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -795,11 +1241,19 @@ def main():
     app.add_handler(CommandHandler("pitch", pitch_command))
     app.add_handler(CommandHandler("token", token_command))
     
+    # Comandos de Voice Cloning
+    app.add_handler(CommandHandler("clonar", clonar_command))
+    app.add_handler(CommandHandler("minhasvozes", minhasvozes_command))
+    app.add_handler(CommandHandler("cancelar", cancelar_command))
+    
     # Callbacks (botões)
     app.add_handler(CallbackQueryHandler(callback_handler))
     
     # Mensagens de texto
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_texto))
+    
+    # Handler de áudio para clone de voz
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, processar_audio_clone))
     
     logger.info("🚀 Bot iniciado!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
