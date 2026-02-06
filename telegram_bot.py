@@ -72,7 +72,7 @@ user_models: Dict[int, str] = {}
 # { 'speed': 1.0, 'pitch': 0.0 }
 user_settings: Dict[int, Dict[str, float]] = {}
 DEFAULT_SPEED = 1.0
-DEFAULT_PITCH = 0.0
+DEFAULT_PITCH = 1.1  # Temperature padrão do site
 
 
 # Mapeamento de vozes por idioma (baseado na documentação Inworld)
@@ -589,51 +589,69 @@ async def speed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current = user_settings.get(user_id, {}).get('speed', DEFAULT_SPEED)
     
-    # Botões de velocidade
+    # Botões de velocidade (0.5 a 1.5, padrão 1.0)
     keyboard = [
         [
-            InlineKeyboardButton("0.5x", callback_data="speed:0.5"),
-            InlineKeyboardButton("0.8x", callback_data="speed:0.8"),
-            InlineKeyboardButton("1.0x", callback_data="speed:1.0"),
+            InlineKeyboardButton("0.5", callback_data="speed:0.5"),
+            InlineKeyboardButton("0.6", callback_data="speed:0.6"),
+            InlineKeyboardButton("0.7", callback_data="speed:0.7"),
         ],
         [
-            InlineKeyboardButton("1.2x", callback_data="speed:1.2"),
-            InlineKeyboardButton("1.5x", callback_data="speed:1.5"),
+            InlineKeyboardButton("0.8", callback_data="speed:0.8"),
+            InlineKeyboardButton("0.9", callback_data="speed:0.9"),
+            InlineKeyboardButton("✓ 1.0", callback_data="speed:1.0"),
+        ],
+        [
+            InlineKeyboardButton("1.1", callback_data="speed:1.1"),
+            InlineKeyboardButton("1.2", callback_data="speed:1.2"),
+            InlineKeyboardButton("1.3", callback_data="speed:1.3"),
+        ],
+        [
+            InlineKeyboardButton("1.4", callback_data="speed:1.4"),
+            InlineKeyboardButton("1.5", callback_data="speed:1.5"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
         f"⏩ **Velocidade Atual:** `{current}`\n\n"
-        "Selecione a nova velocidade:",
+        "Valores: 0.5 (lento) → 1.5 (rápido)\n"
+        "Padrão: 1.0\n\n"
+        "Selecione:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
 async def pitch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu para configurar tom"""
+    """Menu para configurar temperatura (pitch)"""
     user_id = update.effective_user.id
     current = user_settings.get(user_id, {}).get('pitch', DEFAULT_PITCH)
     
-    # Botões de pitch
+    # Botões de temperatura (0.7 a 1.5, padrão 1.1)
     keyboard = [
         [
-            InlineKeyboardButton("Grave (-5)", callback_data="pitch:-5.0"),
-            InlineKeyboardButton("Médio (-2)", callback_data="pitch:-2.0"),
+            InlineKeyboardButton("0.7", callback_data="pitch:0.7"),
+            InlineKeyboardButton("0.8", callback_data="pitch:0.8"),
+            InlineKeyboardButton("0.9", callback_data="pitch:0.9"),
         ],
         [
-            InlineKeyboardButton("Normal (0)", callback_data="pitch:0.0"),
+            InlineKeyboardButton("1.0", callback_data="pitch:1.0"),
+            InlineKeyboardButton("✓ 1.1", callback_data="pitch:1.1"),
+            InlineKeyboardButton("1.2", callback_data="pitch:1.2"),
         ],
         [
-            InlineKeyboardButton("Agudo (+2)", callback_data="pitch:2.0"),
-            InlineKeyboardButton("Esquilo (+5)", callback_data="pitch:5.0"),
+            InlineKeyboardButton("1.3", callback_data="pitch:1.3"),
+            InlineKeyboardButton("1.4", callback_data="pitch:1.4"),
+            InlineKeyboardButton("1.5", callback_data="pitch:1.5"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        f"🎵 **Tom Atual:** `{current}`\n\n"
-        "Selecione o novo tom:",
+        f"🌡️ **Temperatura Atual:** `{current}`\n\n"
+        "Valores: 0.7 (frio) → 1.5 (quente)\n"
+        "Padrão: 1.1\n\n"
+        "Selecione:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -793,17 +811,15 @@ async def minhasvozes_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Mensagem simplificada (sem IDs para evitar erro de Markdown)
     texto = f"🎭 **Suas Vozes Clonadas ({len(voices)}):**\n\n"
     for v in voices[:10]:
-        # Escapa underscores para Markdown
-        voice_id_escaped = v.get('voiceId', '').replace("_", "\\_")
-        texto += f"• **{v.get('displayName')}** ({v.get('langCode')})\n"
-        texto += f"  `{voice_id_escaped}`\n\n"
+        texto += f"• {v.get('displayName')} ({v.get('langCode')})\n"
     
     if len(voices) > 10:
-        texto += f"_...e mais {len(voices) - 10} vozes_\n"
+        texto += f"\n_...e mais {len(voices) - 10} vozes_\n"
     
-    texto += "\n💡 Clique para selecionar uma voz:"
+    texto += "\n💡 Clique para selecionar:"
     
     await update.message.reply_text(texto, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -1118,17 +1134,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Define a voz clonada como voz atual
             user_voices[user_id] = voice_id
             
-            # Escapa underscores para Markdown
-            voice_id_escaped = voice_id.replace("_", "\\_")
-            
             await query.edit_message_text(
                 "🎉 **VOZ CLONADA COM SUCESSO!**\n\n"
-                f"📛 Nome: **{voice.get('displayName')}**\n"
-                f"🌍 Idioma: {voice.get('langCode')}\n"
-                f"🆔 ID: `{voice_id_escaped}`\n\n"
+                f"📛 Nome: {voice.get('displayName')}\n"
+                f"🌍 Idioma: {voice.get('langCode')}\n\n"
                 "✅ Esta voz já foi selecionada!\n"
-                "Envie um texto para testar.",
-                parse_mode="Markdown"
+                "Envie um texto para testar."
             )
             logger.info(f"🎭 {query.from_user.first_name} clonou voz: {voice.get('displayName')}")
         else:
