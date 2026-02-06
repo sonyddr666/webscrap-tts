@@ -721,6 +721,7 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🎤 **Voz atual:** `{current_name}`\n\n"
         "Escolha uma nova voz:",
+        reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
@@ -794,8 +795,10 @@ async def minhasvozes_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     texto = f"🎭 **Suas Vozes Clonadas ({len(voices)}):**\n\n"
     for v in voices[:10]:
+        # Escapa underscores para Markdown
+        voice_id_escaped = v.get('voiceId', '').replace("_", "\\_")
         texto += f"• **{v.get('displayName')}** ({v.get('langCode')})\n"
-        texto += f"  `{v.get('voiceId')}`\n\n"
+        texto += f"  `{voice_id_escaped}`\n\n"
     
     if len(voices) > 10:
         texto += f"_...e mais {len(voices) - 10} vozes_\n"
@@ -1115,11 +1118,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Define a voz clonada como voz atual
             user_voices[user_id] = voice_id
             
+            # Escapa underscores para Markdown
+            voice_id_escaped = voice_id.replace("_", "\\_")
+            
             await query.edit_message_text(
                 "🎉 **VOZ CLONADA COM SUCESSO!**\n\n"
                 f"📛 Nome: **{voice.get('displayName')}**\n"
                 f"🌍 Idioma: {voice.get('langCode')}\n"
-                f"🆔 ID: `{voice_id}`\n\n"
+                f"🆔 ID: `{voice_id_escaped}`\n\n"
                 "✅ Esta voz já foi selecionada!\n"
                 "Envie um texto para testar.",
                 parse_mode="Markdown"
