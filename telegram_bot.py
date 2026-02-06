@@ -482,22 +482,32 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = user_voices.get(user_id, DEFAULT_VOICE)
     voice_name = voice.split('__')[-1] if '__' in voice else voice
     
+    # Botões 3x3
+    keyboard = [
+        [
+            InlineKeyboardButton("🎤 Vozes", callback_data="menu:voices"),
+            InlineKeyboardButton("🔊 Voz", callback_data="menu:voice"),
+            InlineKeyboardButton("🌍 Idioma", callback_data="menu:idioma"),
+        ],
+        [
+            InlineKeyboardButton("🤖 Modelo", callback_data="menu:model"),
+            InlineKeyboardButton("⏩ Speed", callback_data="menu:speed"),
+            InlineKeyboardButton("🌡️ Temp", callback_data="menu:pitch"),
+        ],
+        [
+            InlineKeyboardButton("🎭 Clonar", callback_data="menu:clonar"),
+            InlineKeyboardButton("📋 Minhas", callback_data="menu:minhasvozes"),
+            InlineKeyboardButton("🔑 Token", callback_data="menu:token"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        "🎙️ **Bot TTS Inworld AI v4**\n\n"
-        "Envie texto para gerar áudio!\n\n"
-        "**Comandos TTS:**\n"
-        "• /voices - Lista vozes\n"
-        "• /voice - Trocar voz\n"
-        "• /idioma - Filtrar por idioma\n"
-        "• /model - Alterar modelo TTS\n"
-        "• /speed - Ajustar Velocidade\n"
-        "• /pitch - Ajustar Tom\n"
-        "• /token - Renovar token\n\n"
-        "**🎭 Voice Cloning:**\n"
-        "• /clonar - Criar voz personalizada\n"
-        "• /minhasvozes - Ver vozes clonadas\n"
-        "• /cancelar - Cancelar clonagem\n\n"
-        f"🎤 Voz atual: `{voice_name}`",
+        f"🎙️ **Bot TTS Inworld AI v4**\n\n"
+        f"🎤 Voz: {voice_name}\n\n"
+        "Envie texto para gerar áudio!\n"
+        "Use os botões abaixo:",
+        reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
@@ -964,6 +974,236 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     user_id = query.from_user.id
+    
+    # ============================================================
+    # MENU DO /START
+    # ============================================================
+    
+    if data.startswith("menu:"):
+        menu_action = data.split(":")[1]
+        
+        if menu_action == "voices":
+            # Lista vozes
+            voices = fetch_voices()
+            if not voices:
+                await query.edit_message_text("❌ Erro ao carregar vozes.")
+                return
+            texto = "🎤 **Vozes Disponíveis:**\n\n"
+            for i, v in enumerate(voices[:15], 1):
+                texto += f"{i}. {v.get('displayName')}\n"
+            texto += "\nUse /voice para selecionar."
+            await query.edit_message_text(texto, parse_mode="Markdown")
+            return
+        
+        elif menu_action == "voice":
+            # Menu de seleção de voz
+            current_voice = user_voices.get(user_id, DEFAULT_VOICE)
+            voices = fetch_voices()[:9]
+            if not voices:
+                await query.edit_message_text("❌ Erro ao carregar vozes.")
+                return
+            
+            keyboard = []
+            row = []
+            for voice in voices:
+                name = voice.get('displayName', '?')[:12]
+                voice_id = voice.get('voiceId') or voice.get('name', '')
+                prefix = "✓ " if voice_id == current_voice else ""
+                row.append(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"voice:{voice_id}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("« Voltar", callback_data="menu:back")])
+            
+            await query.edit_message_text(
+                "🔊 **Selecione uma voz:**",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "idioma":
+            # Menu de idiomas
+            keyboard = []
+            row = []
+            for code, name in IDIOMAS.items():
+                row.append(InlineKeyboardButton(name, callback_data=f"idioma:{code}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("« Voltar", callback_data="menu:back")])
+            
+            await query.edit_message_text(
+                "🌍 **Filtrar por idioma:**",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "model":
+            # Menu de modelos
+            current_model = user_models.get(user_id, DEFAULT_MODEL)
+            keyboard = []
+            for model_id, name in MODELOS.items():
+                prefix = "✅ " if model_id == current_model else ""
+                keyboard.append([InlineKeyboardButton(f"{prefix}{name}", callback_data=f"model:{model_id}")])
+            keyboard.append([InlineKeyboardButton("« Voltar", callback_data="menu:back")])
+            
+            await query.edit_message_text(
+                "🤖 **Selecione o modelo:**",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "speed":
+            # Menu de velocidade
+            current = user_settings.get(user_id, {}).get('speed', DEFAULT_SPEED)
+            keyboard = [
+                [
+                    InlineKeyboardButton("0.5", callback_data="speed:0.5"),
+                    InlineKeyboardButton("0.6", callback_data="speed:0.6"),
+                    InlineKeyboardButton("0.7", callback_data="speed:0.7"),
+                ],
+                [
+                    InlineKeyboardButton("0.8", callback_data="speed:0.8"),
+                    InlineKeyboardButton("0.9", callback_data="speed:0.9"),
+                    InlineKeyboardButton("✓ 1.0", callback_data="speed:1.0"),
+                ],
+                [
+                    InlineKeyboardButton("1.1", callback_data="speed:1.1"),
+                    InlineKeyboardButton("1.2", callback_data="speed:1.2"),
+                    InlineKeyboardButton("1.3", callback_data="speed:1.3"),
+                ],
+                [
+                    InlineKeyboardButton("1.4", callback_data="speed:1.4"),
+                    InlineKeyboardButton("1.5", callback_data="speed:1.5"),
+                    InlineKeyboardButton("« Voltar", callback_data="menu:back"),
+                ]
+            ]
+            await query.edit_message_text(
+                f"⏩ **Speed atual:** {current}\n\n0.5 (lento) → 1.5 (rápido)",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "pitch":
+            # Menu de temperatura
+            current = user_settings.get(user_id, {}).get('pitch', DEFAULT_PITCH)
+            keyboard = [
+                [
+                    InlineKeyboardButton("0.7", callback_data="pitch:0.7"),
+                    InlineKeyboardButton("0.8", callback_data="pitch:0.8"),
+                    InlineKeyboardButton("0.9", callback_data="pitch:0.9"),
+                ],
+                [
+                    InlineKeyboardButton("1.0", callback_data="pitch:1.0"),
+                    InlineKeyboardButton("✓ 1.1", callback_data="pitch:1.1"),
+                    InlineKeyboardButton("1.2", callback_data="pitch:1.2"),
+                ],
+                [
+                    InlineKeyboardButton("1.3", callback_data="pitch:1.3"),
+                    InlineKeyboardButton("1.4", callback_data="pitch:1.4"),
+                    InlineKeyboardButton("1.5", callback_data="pitch:1.5"),
+                ],
+                [InlineKeyboardButton("« Voltar", callback_data="menu:back")]
+            ]
+            await query.edit_message_text(
+                f"🌡️ **Temperatura atual:** {current}\n\n0.7 (frio) → 1.5 (quente)",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "clonar":
+            # Inicia clone
+            if user_id in clone_sessions:
+                del clone_sessions[user_id]
+            clone_sessions[user_id] = {'step': 'nome', 'files': []}
+            await query.edit_message_text(
+                "🎭 **CLONAR VOZ**\n\n"
+                "**Passo 1/3:** Digite o nome para a nova voz:\n\n"
+                "_Exemplo: MinhaVoz, VozCustomizada_\n\n"
+                "Use /cancelar para abortar.",
+                parse_mode="Markdown"
+            )
+            return
+        
+        elif menu_action == "minhasvozes":
+            # Lista vozes clonadas
+            voices = list_custom_voices()
+            if not voices:
+                await query.edit_message_text(
+                    "📭 Nenhuma voz clonada!\n\nUse 🎭 Clonar para criar."
+                )
+                return
+            
+            keyboard = []
+            row = []
+            for voice in voices[:12]:
+                name = voice.get('displayName', '?')[:12]
+                voice_id = voice.get('voiceId', '')
+                row.append(InlineKeyboardButton(f"🎭 {name}", callback_data=f"voice:{voice_id}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("« Voltar", callback_data="menu:back")])
+            
+            texto = f"🎭 **Vozes Clonadas ({len(voices)}):**\n\n"
+            for v in voices[:5]:
+                texto += f"• {v.get('displayName')}\n"
+            
+            await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            return
+        
+        elif menu_action == "token":
+            # Renova token
+            await query.edit_message_text("🔄 Renovando token...")
+            new_token = refresh_inworld_token()
+            if new_token:
+                await query.edit_message_text("✅ Token renovado com sucesso!")
+            else:
+                await query.edit_message_text("❌ Falha ao renovar token!")
+            return
+        
+        elif menu_action == "back":
+            # Volta ao menu principal
+            voice = user_voices.get(user_id, DEFAULT_VOICE)
+            voice_name = voice.split('__')[-1] if '__' in voice else voice
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎤 Vozes", callback_data="menu:voices"),
+                    InlineKeyboardButton("🔊 Voz", callback_data="menu:voice"),
+                    InlineKeyboardButton("🌍 Idioma", callback_data="menu:idioma"),
+                ],
+                [
+                    InlineKeyboardButton("🤖 Modelo", callback_data="menu:model"),
+                    InlineKeyboardButton("⏩ Speed", callback_data="menu:speed"),
+                    InlineKeyboardButton("🌡️ Temp", callback_data="menu:pitch"),
+                ],
+                [
+                    InlineKeyboardButton("🎭 Clonar", callback_data="menu:clonar"),
+                    InlineKeyboardButton("📋 Minhas", callback_data="menu:minhasvozes"),
+                    InlineKeyboardButton("🔑 Token", callback_data="menu:token"),
+                ],
+            ]
+            await query.edit_message_text(
+                f"🎙️ **Bot TTS Inworld AI v4**\n\n"
+                f"🎤 Voz: {voice_name}\n\n"
+                "Envie texto para gerar áudio!\n"
+                "Use os botões abaixo:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
     
     if data.startswith("model:"):
         # Selecionou modelo
