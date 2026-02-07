@@ -22,6 +22,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # Carrega variáveis de ambiente
 load_dotenv()
 
+# Import billing info para comando /uso
+from billing_info import get_usage_text
+
 # ============================================================
 # CONFIGURAÇÕES
 # ============================================================
@@ -562,6 +565,18 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Verifique se o FIREBASE_REFRESH_TOKEN está válido.",
             parse_mode="Markdown"
         )
+
+
+async def uso_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra relatório de uso TTS"""
+    await update.message.reply_text("📊 Obtendo dados de uso...")
+    
+    try:
+        texto = get_usage_text()
+        await update.message.reply_text(texto, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Erro /uso: {e}")
+        await update.message.reply_text(f"❌ Erro ao obter dados: {e}")
 
 
 async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1497,6 +1512,7 @@ def main():
     app.add_handler(CommandHandler("speed", speed_command))
     app.add_handler(CommandHandler("pitch", pitch_command))
     app.add_handler(CommandHandler("token", token_command))
+    app.add_handler(CommandHandler("uso", uso_command))
     
     # Comandos de Voice Cloning
     app.add_handler(CommandHandler("clonar", clonar_command))
